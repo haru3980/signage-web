@@ -12,7 +12,7 @@ const { WebSocketServer, WebSocket } = require("ws");
 // 別の名前にした場合は FRONTEND_ORIGIN 環境変数で上書きしてください。
 // ============================================================
 const FRONTEND_ORIGIN =
-  process.env.FRONTEND_ORIGIN || "https://signage-web.vercel.app";
+  process.env.FRONTEND_ORIGIN || "https://signage-web-gray.vercel.app";
 
 // ============================================================
 // 永続化(JSONファイル)
