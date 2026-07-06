@@ -8,8 +8,8 @@ import { QRCodeSVG } from "qrcode.react";
 // Renderのサービス名を "signage-web-backend" にすれば変更不要。
 // 別の名前にした場合はここを書き換えてください。
 // ============================================================
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://signage-web-backend.onrender.com";
-const WS_URL      = import.meta.env.VITE_WS_URL      || "wss://signage-web-backend.onrender.com/ws";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://signage-web-backend-9rr7.onrender.com";
+const WS_URL      = import.meta.env.VITE_WS_URL      || "wss://signage-web-backend-9rr7.onrender.com/ws";
 
 // ============================================================
 // グローバルCSS
