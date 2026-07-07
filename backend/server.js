@@ -7,9 +7,9 @@ const cors = require("cors");
 const { WebSocketServer, WebSocket } = require("ws");
 
 // ============================================================
-// デフォルトURL設定
-// Renderで名前を "signage-web-backend" にした場合は環境変数不要。
-// 別の名前にした場合は FRONTEND_ORIGIN 環境変数で上書きしてください。
+// URL設定
+// Renderのサービス名を "signage-web-backend-9rr7" にした場合はそのまま使えます。
+// フロントエンド: https://signage-web-gray.vercel.app
 // ============================================================
 const FRONTEND_ORIGIN =
   process.env.FRONTEND_ORIGIN || "https://signage-web-gray.vercel.app";
@@ -17,10 +17,9 @@ const FRONTEND_ORIGIN =
 // ============================================================
 // 永続化(JSONファイル)
 // Render無料プランのファイルシステムは再起動のたびに初期化されます。
-// そのためスリープ復帰後はデータが消える場合があります(検証用途向け)。
 // ============================================================
 const DATA_FILE = path.join(__dirname, "db.json");
-const DEFAULT_SETTINGS = { playlist_urls: [], schedules: [] };
+const DEFAULT_SETTINGS = { playlist_urls: [], playlist_id: null, schedules: [] };
 let writeQueue = Promise.resolve();
 
 async function readSettings() {
@@ -31,7 +30,6 @@ async function readSettings() {
     return DEFAULT_SETTINGS;
   }
 }
-
 function writeSettings(settings) {
   writeQueue = writeQueue.then(() =>
     fs.writeFile(DATA_FILE, JSON.stringify({ settings }, null, 2))
@@ -48,17 +46,21 @@ function validate(body) {
   const errors = [];
   if (!Array.isArray(body.playlist_urls))
     errors.push("playlist_urls は配列である必要があります");
-  if (!Array.isArray(body.schedules))
+  // playlist_id は文字列またはnullを許容
+  if (body.playlist_id !== null && body.playlist_id !== undefined
+      && typeof body.playlist_id !== "string")
+    errors.push("playlist_id は文字列またはnullである必要があります");
+  if (!Array.isArray(body.schedules)) {
     errors.push("schedules は配列である必要があります");
-  else {
+  } else {
     body.schedules.forEach((s, i) => {
-      if (typeof s.id !== "string") errors.push(`schedules[${i}].id が不正`);
-      if (typeof s.name !== "string") errors.push(`schedules[${i}].name が不正`);
+      if (typeof s.id !== "string")      errors.push(`schedules[${i}].id が不正`);
+      if (typeof s.name !== "string")    errors.push(`schedules[${i}].name が不正`);
       if (typeof s.enabled !== "boolean") errors.push(`schedules[${i}].enabled が不正`);
       if (!Array.isArray(s.target_days) || s.target_days.length !== 7)
         errors.push(`schedules[${i}].target_days は7要素の配列が必要`);
-      if (!TIME_RE.test(s.sleep_time)) errors.push(`schedules[${i}].sleep_time はHH:MM形式`);
-      if (!TIME_RE.test(s.wake_time)) errors.push(`schedules[${i}].wake_time はHH:MM形式`);
+      if (!TIME_RE.test(s.sleep_time))   errors.push(`schedules[${i}].sleep_time はHH:MM形式`);
+      if (!TIME_RE.test(s.wake_time))    errors.push(`schedules[${i}].wake_time はHH:MM形式`);
     });
   }
   return errors;
@@ -86,21 +88,15 @@ function broadcast(msg) {
   });
 }
 
-// GET /api/health
 app.get("/api/health", (_, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// GET /api/settings
 app.get("/api/settings", async (_, res) => {
-  try {
-    res.json(await readSettings());
-  } catch {
-    res.status(500).json({ error: "取得失敗" });
-  }
+  try { res.json(await readSettings()); }
+  catch { res.status(500).json({ error: "取得失敗" }); }
 });
 
-// POST /api/settings
 app.post("/api/settings", async (req, res) => {
   const errors = validate(req.body);
   if (errors.length) return res.status(400).json({ error: "入力エラー", details: errors });
@@ -113,7 +109,6 @@ app.post("/api/settings", async (req, res) => {
   }
 });
 
-// WebSocket: 接続直後にINITを送信
 wss.on("connection", async (ws) => {
   try {
     ws.send(JSON.stringify({ type: "INIT", payload: await readSettings() }));
