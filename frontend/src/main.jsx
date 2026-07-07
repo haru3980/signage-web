@@ -1,15 +1,14 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 
 // ============================================================
-// バックエンドURL設定
-// Renderのサービス名を "signage-web-backend" にすれば変更不要。
-// 別の名前にした場合はここを書き換えてください。
+// URL設定(バックエンド: Render / フロントエンド: Vercel)
 // ============================================================
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://signage-web-backend-9rr7.onrender.com";
-const WS_URL      = import.meta.env.VITE_WS_URL      || "wss://signage-web-backend-9rr7.onrender.com/ws";
+const BACKEND_URL  = import.meta.env.VITE_BACKEND_URL || "https://signage-web-backend-9rr7.onrender.com";
+const WS_URL       = import.meta.env.VITE_WS_URL      || "wss://signage-web-backend-9rr7.onrender.com/ws";
+const FRONTEND_URL = "https://signage-web-gray.vercel.app";
 
 // ============================================================
 // グローバルCSS
@@ -34,8 +33,12 @@ button,input{font-family:inherit}
 
 /* プレイヤー */
 .player{position:relative;width:100vw;height:100vh;background:#000;overflow:hidden}
-.player iframe,.player #yt-player{width:100%;height:100%;border:none}
+.player #yt-player{width:100%;height:100%;border:none;display:block}
 .sleep-overlay{position:fixed;inset:0;background:#000;z-index:9999;transition:opacity .6s ease}
+
+/* 全画面ボタン */
+.fs-btn{position:fixed;bottom:24px;right:24px;z-index:9998;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:8px;padding:10px 16px;font-size:13px;cursor:pointer;backdrop-filter:blur(4px);transition:opacity .2s}
+.fs-btn:hover{background:rgba(0,0,0,.8)}
 
 /* トースト */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;padding:12px 20px;border-radius:4px;font-size:14px;z-index:10000;border:1px solid rgba(245,166,35,.4);white-space:nowrap}
@@ -55,6 +58,12 @@ button,input{font-family:inherit}
 .hint{font-size:12px;color:#7c8aa0;margin-bottom:14px}
 .qr-wrap{display:flex;justify-content:center;padding:16px;background:#182338;border-radius:4px;margin-bottom:10px}
 .ctrl-url{display:block;font-family:monospace;font-size:11px;color:#7c8aa0;word-break:break-all;text-align:center}
+
+/* タブ切り替え */
+.tabs{display:flex;gap:0;margin-bottom:16px;border:1px solid #263349;border-radius:6px;overflow:hidden}
+.tab{flex:1;padding:9px;font-size:13px;cursor:pointer;background:#182338;color:#7c8aa0;border:none;transition:background .15s,color .15s}
+.tab.active{background:#263349;color:#e8e6df;font-weight:600}
+
 .url-list{list-style:none;display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:200px;overflow-y:auto}
 .url-empty{color:#7c8aa0;font-size:13px;padding:6px 0}
 .url-item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#182338;border:1px solid #263349;border-radius:4px;padding:8px 10px}
@@ -62,6 +71,10 @@ button,input{font-family:inherit}
 .row{display:flex;gap:8px}
 input[type=text],input[type=time]{background:#182338;border:1px solid #263349;color:#e8e6df;border-radius:4px;padding:9px 12px;font-size:13px;flex:1;min-width:0}
 input:focus{outline:2px solid #2fd3c3;outline-offset:1px}
+.pl-box{background:#182338;border:1px solid #263349;border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.pl-label{font-size:12px;color:#7c8aa0}
+.pl-current{font-family:monospace;font-size:12px;color:#2fd3c3;word-break:break-all;min-height:18px}
+
 .btn{background:#182338;border:1px solid #263349;color:#e8e6df;border-radius:4px;padding:9px 16px;font-size:13px;cursor:pointer;white-space:nowrap;transition:border-color .15s}
 .btn:hover{border-color:#f5a623}
 .btn-ghost{background:transparent;border-color:transparent;color:#7c8aa0}
@@ -70,6 +83,7 @@ input:focus{outline:2px solid #2fd3c3;outline-offset:1px}
 .btn-pri{background:#f5a623;border-color:#f5a623;color:#1a1200;font-weight:700;padding:12px 28px;font-size:14px}
 .btn-pri:hover{background:#ffb648}
 .btn:disabled{opacity:.5;cursor:not-allowed}
+
 .sched-list{display:flex;flex-direction:column;gap:14px;margin-bottom:16px}
 .sched-card{border:1px solid #263349;border-radius:4px;background:#182338;padding:14px;display:flex;flex-direction:column;gap:10px}
 .sched-row{display:flex;align-items:center;gap:10px}
@@ -83,8 +97,6 @@ input:focus{outline:2px solid #2fd3c3;outline-offset:1px}
 .status{color:#7c8aa0;font-family:monospace;font-size:13px;padding:16px 0}
 .status-err{color:#e0637a}
 `;
-
-// スタイルを注入
 const styleEl = document.createElement("style");
 styleEl.textContent = css;
 document.head.appendChild(styleEl);
@@ -103,29 +115,35 @@ function inInterval(cur, s, e) {
 function hhMM(d) {
   return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
 }
-function dayIndex(d) { return (d.getDay() + 6) % 7; } // 0=月…6=日
+function dayIndex(d) { return (d.getDay() + 6) % 7; }
 const DAY_LABELS = ["月","火","水","木","金","土","日"];
 
 function findSleepSchedule(schedules) {
   if (!Array.isArray(schedules)) return null;
-  const now = new Date();
-  const cur = hhMM(now), di = dayIndex(now);
+  const now = new Date(), cur = hhMM(now), di = dayIndex(now);
   for (const s of schedules) {
-    if (!s.enabled) continue;
-    if (!s.target_days?.[di]) continue;
+    if (!s.enabled || !s.target_days?.[di]) continue;
     if (inInterval(cur, s.sleep_time, s.wake_time)) return s;
   }
   return null;
 }
 
 // ============================================================
-// YouTubeのURLから動画IDを取得
+// ユーティリティ: YouTube URL解析
 // ============================================================
 function extractVideoId(url) {
   try {
     const u = new URL(url);
-    if (u.hostname.includes("youtu.be")) return u.pathname.slice(1);
+    if (u.hostname.includes("youtu.be")) return u.pathname.slice(1).split("?")[0];
     if (u.searchParams.has("v")) return u.searchParams.get("v");
+  } catch {}
+  return null;
+}
+
+function extractPlaylistId(url) {
+  try {
+    const u = new URL(url);
+    if (u.searchParams.has("list")) return u.searchParams.get("list");
   } catch {}
   return null;
 }
@@ -159,26 +177,28 @@ function Home() {
 // ページ: プレイヤー
 // ============================================================
 function Player() {
-  const playerRef      = useRef(null);
-  const playlistRef    = useRef([]);
-  const pendingRef     = useRef(null);
-  const indexRef       = useRef(0);
-  const schedulesRef   = useRef([]);
-  const readyRef       = useRef(false);
-  const errCountRef    = useRef(0);
-  const isBootRef      = useRef(true);
-  const toastTimer     = useRef(null);
-  const breakoutTimer  = useRef(null);
-  const wsRef          = useRef(null);
-  const backoffRef     = useRef(1000);
-  const pollRef        = useRef(null);
-  const connectedRef   = useRef(false);
-  const lastPayload    = useRef(null);
+  const playerRef     = useRef(null);
+  const playlistRef   = useRef([]);
+  const pendingRef    = useRef(null);
+  const indexRef      = useRef(0);
+  const schedulesRef  = useRef([]);
+  const readyRef      = useRef(false);
+  const errCountRef   = useRef(0);
+  const toastTimer    = useRef(null);
+  const breakoutTimer = useRef(null);
+  const wsRef         = useRef(null);
+  const backoffRef    = useRef(1000);
+  const pollRef       = useRef(null);
+  const connectedRef  = useRef(false);
+  const lastPayload   = useRef(null);
 
-  const [sleeping, setSleeping]       = useState(false);
-  const [overlay, setOverlay]         = useState(1);
-  const [toast, setToast]             = useState(false);
+  // 再生モード: "individual"=個別URL / "playlist"=プレイリスト
+  const modeRef       = useRef("individual");
+  const playlistIdRef = useRef(null);
 
+  const [sleeping, setSleeping] = useState(false);
+  const [overlay, setOverlay]   = useState(1);
+  const [toast, setToast]       = useState(false);
   const sleepingRef = useRef(false);
   useEffect(() => { sleepingRef.current = sleeping; }, [sleeping]);
 
@@ -188,6 +208,16 @@ function Player() {
     toastTimer.current = setTimeout(() => setToast(false), 5000);
   }
 
+  // 全画面切り替え
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+
+  // 個別URL方式: 指定インデックスの動画をロード
   function loadVideo(index) {
     const id = playlistRef.current[index];
     if (readyRef.current && playerRef.current && id) {
@@ -195,6 +225,7 @@ function Player() {
     }
   }
 
+  // 個別URL方式: 次の動画へ進む
   function advance() {
     if (pendingRef.current) {
       playlistRef.current = pendingRef.current;
@@ -207,24 +238,35 @@ function Player() {
     loadVideo(indexRef.current);
   }
 
+  // 設定を受け取って再生モードを切り替える
   function applySettings(settings) {
-    const ids = (settings?.playlist_urls ?? []).map(extractVideoId).filter(Boolean);
     schedulesRef.current = settings?.schedules ?? [];
-    if (playlistRef.current.length === 0) {
-      playlistRef.current = ids;
-      indexRef.current = 0;
-      if (readyRef.current) loadVideo(0);
+    const urls = settings?.playlist_urls ?? [];
+    const plId = settings?.playlist_id ?? null;
+
+    if (plId) {
+      // プレイリストURL方式
+      modeRef.current = "playlist";
+      playlistIdRef.current = plId;
+      if (readyRef.current && playerRef.current) {
+        playerRef.current.loadPlaylist({ list: plId, listType: "playlist", index: 0 });
+      }
     } else {
-      pendingRef.current = ids;
+      // 個別URL方式
+      modeRef.current = "individual";
+      const ids = urls.map(extractVideoId).filter(Boolean);
+      if (playlistRef.current.length === 0) {
+        playlistRef.current = ids;
+        indexRef.current = 0;
+        if (readyRef.current) loadVideo(0);
+      } else {
+        pendingRef.current = ids;
+      }
     }
   }
 
   function handleMessage(msg) {
-    if (msg.type === "INIT") {
-      applySettings(msg.payload);
-      isBootRef.current = false;
-      return;
-    }
+    if (msg.type === "INIT") { applySettings(msg.payload); return; }
     if (msg.type === "SETTINGS_UPDATED") {
       applySettings(msg.payload);
       if (sleepingRef.current) {
@@ -256,24 +298,19 @@ function Player() {
         } catch {}
       }, 10000);
     }
-
     function connect() {
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
-      ws.onopen  = () => { connectedRef.current = true; backoffRef.current = 1000; };
-      ws.onmessage = (e) => {
-        try { handleMessage(JSON.parse(e.data)); } catch {}
-      };
-      ws.onclose = () => {
+      ws.onopen    = () => { connectedRef.current = true; backoffRef.current = 1000; };
+      ws.onmessage = (e) => { try { handleMessage(JSON.parse(e.data)); } catch {} };
+      ws.onclose   = () => {
         connectedRef.current = false;
         startPolling();
-        const d = Math.min(backoffRef.current, 30000);
-        setTimeout(connect, d);
+        setTimeout(connect, Math.min(backoffRef.current, 30000));
         backoffRef.current = Math.min(backoffRef.current * 2, 30000);
       };
       ws.onerror = () => ws.close();
     }
-
     connect();
     startPolling();
     return () => {
@@ -287,29 +324,48 @@ function Player() {
   useEffect(() => {
     function createPlayer() {
       playerRef.current = new window.YT.Player("yt-player", {
-        playerVars: { autoplay:1, controls:0, disablekb:1, fs:0, modestbranding:1, rel:0, playsinline:1 },
+        playerVars: {
+          autoplay: 1,
+          controls: 0,
+          disablekb: 1,
+          fs: 0,
+          modestbranding: 1,
+          rel: 0,
+          playsinline: 1,
+          // 字幕を非表示にする
+          cc_load_policy: 0,
+          cc_lang_pref: "none",
+        },
         events: {
           onReady() {
             readyRef.current = true;
-            if (playlistRef.current.length > 0) loadVideo(indexRef.current);
+            // 字幕を強制オフ
+            try { playerRef.current.unloadModule("captions"); } catch {}
+            if (modeRef.current === "playlist" && playlistIdRef.current) {
+              playerRef.current.loadPlaylist({ list: playlistIdRef.current, listType: "playlist", index: 0 });
+            } else if (playlistRef.current.length > 0) {
+              loadVideo(indexRef.current);
+            }
           },
           onStateChange(e) {
-            if (e.data === window.YT.PlayerState.ENDED) {
+            // 個別URL方式のみ手動で次へ進む(プレイリスト方式はYouTube側が自動で進む)
+            if (modeRef.current === "individual" && e.data === window.YT.PlayerState.ENDED) {
               errCountRef.current = 0;
               advance();
             }
           },
           onError(e) {
             console.warn("YouTube再生エラー code:", e.data);
-            errCountRef.current++;
-            if (errCountRef.current < Math.max(playlistRef.current.length, 1) * 2) {
-              setTimeout(advance, 3000);
+            if (modeRef.current === "individual") {
+              errCountRef.current++;
+              if (errCountRef.current < Math.max(playlistRef.current.length, 1) * 2) {
+                setTimeout(advance, 3000);
+              }
             }
           }
         }
       });
     }
-
     if (window.YT?.Player) {
       createPlayer();
     } else {
@@ -328,8 +384,7 @@ function Player() {
       const active = findSleepSchedule(schedulesRef.current);
       if (active && !sleepingRef.current) {
         playerRef.current?.pauseVideo?.();
-        setSleeping(true);
-        setOverlay(1);
+        setSleeping(true); setOverlay(1);
       } else if (!active && sleepingRef.current) {
         setSleeping(false);
         playerRef.current?.playVideo?.();
@@ -345,6 +400,7 @@ function Player() {
       <div id="yt-player" />
       {sleeping && <div className="sleep-overlay" style={{ opacity: overlay }} aria-hidden="true" />}
       {toast && <div className="toast" role="status">設定を保存しました</div>}
+      <button className="fs-btn" onClick={toggleFullscreen}>⛶ 全画面</button>
     </div>
   );
 }
@@ -364,28 +420,38 @@ function makeSchedule() {
 }
 
 function Control() {
-  const [urls, setUrls]       = useState([]);
-  const [newUrl, setNewUrl]   = useState("");
-  const [scheds, setScheds]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
-  const [error, setError]     = useState(null);
-  const [toast, setToast]     = useState(false);
+  // 再生モード: "individual" or "playlist"
+  const [mode, setMode]         = useState("individual");
+  const [urls, setUrls]         = useState([]);
+  const [newUrl, setNewUrl]     = useState("");
+  const [plInput, setPlInput]   = useState("");   // プレイリストURL入力欄
+  const [plSaved, setPlSaved]   = useState("");   // 保存済みプレイリストURL
+  const [scheds, setScheds]     = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState(null);
+  const [toast, setToast]       = useState(false);
   const toastTimer = useRef(null);
 
-  const playerUrl = `${window.location.origin}/player`;
+  const playerUrl = `${FRONTEND_URL}/player`;
 
+  // 初回ロード
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/settings`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error();
         const data = await res.json();
         if (cancelled) return;
         setUrls(data.playlist_urls ?? []);
         setScheds(data.schedules ?? []);
-      } catch (e) {
+        if (data.playlist_id) {
+          setPlSaved(data.playlist_id);
+          setPlInput(`https://www.youtube.com/playlist?list=${data.playlist_id}`);
+          setMode("playlist");
+        }
+      } catch {
         if (!cancelled) setError("設定の取得に失敗しました。バックエンドが起動しているか確認してください。");
       } finally {
         if (!cancelled) setLoading(false);
@@ -406,11 +472,9 @@ function Control() {
     setUrls(p => [...p, t]);
     setNewUrl("");
   }
-
   function removeUrl(i) { setUrls(p => p.filter((_, j) => j !== i)); }
   function addSched()    { setScheds(p => [...p, makeSchedule()]); }
   function removeSched(id) { setScheds(p => p.filter(s => s.id !== id)); }
-
   function updateSched(id, patch) {
     setScheds(p => p.map(s => s.id === id ? { ...s, ...patch } : s));
   }
@@ -424,14 +488,30 @@ function Control() {
   }
 
   async function save() {
+    // プレイリスト方式のとき、URLからIDを取り出す
+    let playlistId = null;
+    if (mode === "playlist") {
+      playlistId = extractPlaylistId(plInput.trim());
+      if (!playlistId) {
+        alert("プレイリストURLが正しくありません。\n例: https://www.youtube.com/playlist?list=XXXXXX");
+        return;
+      }
+    }
+
     setSaving(true);
     try {
+      const body = {
+        playlist_urls: mode === "individual" ? urls : [],
+        playlist_id:   mode === "playlist"   ? playlistId : null,
+        schedules:     scheds,
+      };
       const res = await fetch(`${BACKEND_URL}/api/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playlist_urls: urls, schedules: scheds }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error();
+      if (mode === "playlist") setPlSaved(playlistId);
       showToast();
     } catch {
       alert("保存に失敗しました。入力内容を確認してください。");
@@ -463,28 +543,72 @@ function Control() {
             <code className="ctrl-url">{playerUrl}</code>
           </section>
 
-          {/* プレイリスト */}
+          {/* 再生設定(タブ切り替え) */}
           <section className="panel">
-            <h2>再生プレイリスト設定</h2>
-            <ul className="url-list">
-              {urls.length === 0 && <li className="url-empty">登録されたURLはありません</li>}
-              {urls.map((u, i) => (
-                <li key={i} className="url-item">
-                  <span className="url-text">{u}</span>
-                  <button className="btn btn-ghost" onClick={() => removeUrl(i)}>削除</button>
-                </li>
-              ))}
-            </ul>
-            <div className="row">
-              <input
-                type="text"
-                placeholder="YouTube動画URLを入力"
-                value={newUrl}
-                onChange={e => setNewUrl(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && addUrl()}
-              />
-              <button className="btn" onClick={addUrl}>追加</button>
+            <h2>再生設定</h2>
+
+            {/* タブ */}
+            <div className="tabs">
+              <button
+                className={`tab${mode === "individual" ? " active" : ""}`}
+                onClick={() => setMode("individual")}
+              >
+                個別URL方式
+              </button>
+              <button
+                className={`tab${mode === "playlist" ? " active" : ""}`}
+                onClick={() => setMode("playlist")}
+              >
+                プレイリスト方式
+              </button>
             </div>
+
+            {/* 個別URL方式 */}
+            {mode === "individual" && (
+              <>
+                <ul className="url-list">
+                  {urls.length === 0 && <li className="url-empty">登録されたURLはありません</li>}
+                  {urls.map((u, i) => (
+                    <li key={i} className="url-item">
+                      <span className="url-text">{u}</span>
+                      <button className="btn btn-ghost" onClick={() => removeUrl(i)}>削除</button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="row">
+                  <input
+                    type="text"
+                    placeholder="YouTube動画URLを入力"
+                    value={newUrl}
+                    onChange={e => setNewUrl(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addUrl()}
+                  />
+                  <button className="btn" onClick={addUrl}>追加</button>
+                </div>
+              </>
+            )}
+
+            {/* プレイリスト方式 */}
+            {mode === "playlist" && (
+              <div className="pl-box">
+                <p className="pl-label">YouTubeプレイリストのURLを入力してください</p>
+                <input
+                  type="text"
+                  placeholder="https://www.youtube.com/playlist?list=XXXXXX"
+                  value={plInput}
+                  onChange={e => setPlInput(e.target.value)}
+                />
+                {plSaved && (
+                  <>
+                    <p className="pl-label">現在設定中のプレイリストID:</p>
+                    <span className="pl-current">{plSaved}</span>
+                  </>
+                )}
+                <p className="hint" style={{marginBottom:0}}>
+                  プレイリスト内の動画はYouTube側の順番で自動再生されます。
+                </p>
+              </div>
+            )}
           </section>
 
           {/* スケジュール */}
@@ -503,7 +627,8 @@ function Control() {
                       className="sched-name"
                     />
                     <label className="toggle">
-                      <input type="checkbox" checked={s.enabled} onChange={e => updateSched(s.id, { enabled: e.target.checked })} />
+                      <input type="checkbox" checked={s.enabled}
+                        onChange={e => updateSched(s.id, { enabled: e.target.checked })} />
                       有効
                     </label>
                     <button className="btn btn-ghost" onClick={() => removeSched(s.id)}>削除</button>
@@ -511,19 +636,20 @@ function Control() {
                   <div className="days">
                     {DAY_LABELS.map((l, i) => (
                       <label key={l} className="day-lbl">
-                        <input type="checkbox" checked={s.target_days[i]} onChange={() => toggleDay(s.id, i)} />
+                        <input type="checkbox" checked={s.target_days[i]}
+                          onChange={() => toggleDay(s.id, i)} />
                         {l}
                       </label>
                     ))}
                   </div>
                   <div className="times">
-                    <label>
-                      就寝
-                      <input type="time" value={s.sleep_time} onChange={e => updateSched(s.id, { sleep_time: e.target.value })} />
+                    <label>就寝
+                      <input type="time" value={s.sleep_time}
+                        onChange={e => updateSched(s.id, { sleep_time: e.target.value })} />
                     </label>
-                    <label>
-                      起床
-                      <input type="time" value={s.wake_time} onChange={e => updateSched(s.id, { wake_time: e.target.value })} />
+                    <label>起床
+                      <input type="time" value={s.wake_time}
+                        onChange={e => updateSched(s.id, { wake_time: e.target.value })} />
                     </label>
                   </div>
                 </div>
