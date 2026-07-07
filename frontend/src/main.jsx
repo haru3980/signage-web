@@ -96,6 +96,16 @@ input:focus{outline:2px solid #2fd3c3;outline-offset:1px}
 .save-bar{position:fixed;bottom:0;left:0;right:0;padding:16px 24px;background:linear-gradient(to top,#0b1220 60%,transparent);display:flex;justify-content:center;z-index:100}
 .status{color:#7c8aa0;font-family:monospace;font-size:13px;padding:16px 0}
 .status-err{color:#e0637a}
+
+/* 解説アコーディオン */
+.help-wrap{margin-top:20px;border-top:1px solid #263349;padding-top:16px}
+.help-toggle{width:100%;background:none;border:1px solid #263349;color:#7c8aa0;border-radius:4px;padding:10px 14px;font-size:13px;cursor:pointer;text-align:left;transition:border-color .15s,color .15s}
+.help-toggle:hover{border-color:#2fd3c3;color:#2fd3c3}
+.help-body{margin-top:14px;display:flex;flex-direction:column;gap:12px;font-size:13px;color:#b0b8c8;line-height:1.7}
+.help-body h3{font-size:13px;color:#e8e6df;margin-bottom:2px;margin-top:4px}
+.help-body ul{padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.help-body li{color:#9aaabb}
+.help-body b{color:#e8e6df}
 `;
 const styleEl = document.createElement("style");
 styleEl.textContent = css;
@@ -152,6 +162,7 @@ function extractPlaylistId(url) {
 // ページ: ホーム
 // ============================================================
 function Home() {
+  const [helpOpen, setHelpOpen] = React.useState(false);
   return (
     <div className="home">
       <div className="home-card">
@@ -167,6 +178,54 @@ function Home() {
             <span className="home-link-label">遠隔操作ダッシュボードを開く</span>
             <span className="home-link-path">/control</span>
           </Link>
+        </div>
+
+        {/* 解説・注意事項 */}
+        <div className="help-wrap">
+          <button className="help-toggle" onClick={() => setHelpOpen(o => !o)}>
+            {helpOpen ? "▲ 解説・注意事項を閉じる" : "▼ このシステムの解説・注意事項"}
+          </button>
+          {helpOpen && (
+            <div className="help-body">
+              <h3>このシステムについて</h3>
+              <p>サイネージシステムは、YouTubeの動画をTV・ディスプレイで自動再生するためのWebアプリです。操作はスマホやPCのブラウザから行え、再生端末とは離れた場所からでも設定できます。</p>
+
+              <h3>各ページの役割</h3>
+              <ul>
+                <li><b>再生ページ (/player)</b>　→　TVや常設ディスプレイのブラウザで開く。動画が全画面で自動再生されます。</li>
+                <li><b>ダッシュボード (/control)</b>　→　スマホやPCで開く。再生する動画やスケジュールを設定します。</li>
+              </ul>
+
+              <h3>使い方の流れ</h3>
+              <ul>
+                <li>① ダッシュボード (/control) を開き、YouTubeのURLを登録して「設定を保存」を押す</li>
+                <li>② 再生ページ (/player) をTVのブラウザで開く（ダッシュボードのQRコードを使うと便利）</li>
+                <li>③ 動画が自動再生されます。設定を変更すると即座に再生ページへ反映されます</li>
+              </ul>
+
+              <h3>再生方式について</h3>
+              <ul>
+                <li><b>個別URL方式</b>　→　YouTubeの動画URLを1本ずつ登録。登録した順番でループ再生します。</li>
+                <li><b>プレイリスト方式</b>　→　YouTubeのプレイリストURLを1つ登録。プレイリスト内の動画をまとめて再生します。</li>
+                <li>どちらか一方のみ有効です。保存時に選択中の方式が適用されます。</li>
+              </ul>
+
+              <h3>スケジュール(消灯・点灯)について</h3>
+              <ul>
+                <li>消灯時刻になると再生が止まり画面が暗くなります。点灯時刻になると自動で再生が再開します。</li>
+                <li>複数のスケジュールを登録でき、曜日ごとに個別設定できます。</li>
+                <li>消灯〜点灯が日をまたぐ設定（例: 23:00〜翌07:00）にも対応しています。</li>
+              </ul>
+
+              <h3>注意事項</h3>
+              <ul>
+                <li>無料サーバー(Render)を使用しているため、約15分間アクセスがないとサーバーがスリープします。次にアクセスした際に起動まで数十秒かかる場合があります。</li>
+                <li>サーバーが再起動すると、保存した設定（プレイリスト・スケジュール）が消える場合があります。</li>
+                <li>再生ページはブラウザを閉じると停止します。常時表示するにはTVのブラウザをそのまま開いた状態にしてください。</li>
+                <li>YouTubeの埋め込みが許可されていない動画は自動的にスキップされます。</li>
+              </ul>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -322,6 +381,24 @@ function Player() {
 
   // YouTube IFrame API
   useEffect(() => {
+    // 字幕対策: iframeのsrcに cc_load_policy=0 が含まれていなければ強制付与する。
+    // YouTubeは動画切り替え時にsrcを書き換えるため定期的に監視する。
+    function enforceCaptionsOff() {
+      const iframe = document.querySelector("#yt-player iframe");
+      if (!iframe) return;
+      try {
+        const url = new URL(iframe.src);
+        let changed = false;
+        if (url.searchParams.get("cc_load_policy") !== "0") {
+          url.searchParams.set("cc_load_policy", "0"); changed = true;
+        }
+        if (url.searchParams.get("iv_load_policy") !== "3") {
+          url.searchParams.set("iv_load_policy", "3"); changed = true;
+        }
+        if (changed) iframe.src = url.toString();
+      } catch {}
+    }
+
     function createPlayer() {
       playerRef.current = new window.YT.Player("yt-player", {
         playerVars: {
@@ -332,15 +409,16 @@ function Player() {
           modestbranding: 1,
           rel: 0,
           playsinline: 1,
-          // 字幕を非表示にする
           cc_load_policy: 0,
           cc_lang_pref: "none",
+          iv_load_policy: 3,
         },
         events: {
           onReady() {
             readyRef.current = true;
-            // 字幕を強制オフ
             try { playerRef.current.unloadModule("captions"); } catch {}
+            try { playerRef.current.unloadModule("cc"); } catch {}
+            enforceCaptionsOff();
             if (modeRef.current === "playlist" && playlistIdRef.current) {
               playerRef.current.loadPlaylist({ list: playlistIdRef.current, listType: "playlist", index: 0 });
             } else if (playlistRef.current.length > 0) {
@@ -374,7 +452,12 @@ function Player() {
       document.body.appendChild(tag);
       window.onYouTubeIframeAPIReady = createPlayer;
     }
-    return () => playerRef.current?.destroy?.();
+    // 動画切り替えのたびにiframe srcが書き換わるため、3秒ごとに字幕設定を監視・強制
+    const captionTimer = setInterval(enforceCaptionsOff, 3000);
+    return () => {
+      playerRef.current?.destroy?.();
+      clearInterval(captionTimer);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -643,11 +726,11 @@ function Control() {
                     ))}
                   </div>
                   <div className="times">
-                    <label>就寝
+                    <label>消灯
                       <input type="time" value={s.sleep_time}
                         onChange={e => updateSched(s.id, { sleep_time: e.target.value })} />
                     </label>
-                    <label>起床
+                    <label>点灯
                       <input type="time" value={s.wake_time}
                         onChange={e => updateSched(s.id, { wake_time: e.target.value })} />
                     </label>
